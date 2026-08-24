@@ -30,6 +30,7 @@ public sealed class HitQueue(
     IBattleStatsProvider statsProvider,
     IBuffService buffService,
     IRegenerationService regenerationService,
+    IInflictedCardService inflictedCardService,
     ILogger<HitQueue> logger) : IHitQueue, ISingletonService
 {
     private readonly ConcurrentDictionary<Entity, Channel<HitRequest>> _channels = new();
@@ -98,21 +99,23 @@ public sealed class HitQueue(
         }
     }
 
-    private Task TryApplyHit(HitRequest request)
+    // async because the inflicted cards below are awaited: the blow has landed and the
+    // effect it carries has to follow it, not race it.
+    private async Task TryApplyHit(HitRequest request)
     {
         try
         {
             if (request.Cancellation.IsCancellationRequested)
             {
                 request.Completion.TrySetResult(new HitOutcome(HitStatus.Cancelled, 0, SuPacketHitMode.SuccessAttack, false));
-                return Task.CompletedTask;
+                return;
             }
 
             var target = request.Target;
             if (!target.IsAlive)
             {
                 request.Completion.TrySetResult(new HitOutcome(HitStatus.Cancelled, 0, SuPacketHitMode.SuccessAttack, false));
-                return Task.CompletedTask;
+                return;
             }
 
             var attackerStats = statsProvider.GetStats(request.Origin);
@@ -122,7 +125,7 @@ public sealed class HitQueue(
             if (damage.HitMode == SuPacketHitMode.Miss || damage.Damage <= 0)
             {
                 request.Completion.TrySetResult(new HitOutcome(HitStatus.Missed, 0, damage.HitMode, false));
-                return Task.CompletedTask;
+                return;
             }
 
             var newHp = target.Hp - damage.Damage;
@@ -166,6 +169,19 @@ public sealed class HitQueue(
                 _ = buffService.ApplySkillBuffAsync(target, request.Skill.SkillVnum, request.Skill.Duration, request.Skill.BCards, request.Origin);
             }
 
+            // The cards the skill inflicts - the stun of Star Attack, the poison of a poisoned
+            // arrow. A different thing from the buff above: that one turns the skill's own BCards
+            // into a lasting effect, this one applies the Card the skill names by id.
+            //
+            // On the target and not the caster because we are on a blow that has landed: who
+            // receives it is a question the files do not answer, and here it does not arise.
+            if (!killed && request.Skill.BCards.Count > 0)
+            {
+                await inflictedCardService
+                    .InflictAsync(target, request.Origin, request.Skill.BCards)
+                    .ConfigureAwait(false);
+            }
+
             request.Completion.TrySetResult(new HitOutcome(HitStatus.Landed, damage.Damage, damage.HitMode, killed));
         }
         catch (Exception ex)
@@ -173,7 +189,6 @@ public sealed class HitQueue(
             logger.LogError(ex, "Failed to apply hit to entity {Handle}", request.Target.Handle);
             request.Completion.TrySetException(ex);
         }
-        return Task.CompletedTask;
     }
 
     private static void FlipIsAlive(IAliveEntity entity, bool alive)
