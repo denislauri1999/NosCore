@@ -97,7 +97,7 @@ namespace NosCore.GameObject.Tests.Services.BattleService
             var stats = new Mock<IBattleStatsProvider>();
             stats.Setup(s => s.GetStats(It.IsAny<IAliveEntity>())).Returns(new CombatStats());
 
-            var queue = new HitQueue(calc.Object, stats.Object, buffs.Object, new Mock<IRegenerationService>().Object, new Mock<ILogger<HitQueue>>().Object);
+            var queue = new HitQueue(calc.Object, stats.Object, buffs.Object, new Mock<IRegenerationService>().Object, new Mock<IVitalityService>().Object, new Mock<ILogger<HitQueue>>().Object);
             var skill = MakeSkill() with
             {
                 SkillVnum = 7,
@@ -123,7 +123,7 @@ namespace NosCore.GameObject.Tests.Services.BattleService
             var stats = new Mock<IBattleStatsProvider>();
             stats.Setup(s => s.GetStats(It.IsAny<IAliveEntity>())).Returns(new CombatStats());
 
-            var queue = new HitQueue(calc.Object, stats.Object, buffs.Object, new Mock<IRegenerationService>().Object, new Mock<ILogger<HitQueue>>().Object);
+            var queue = new HitQueue(calc.Object, stats.Object, buffs.Object, new Mock<IRegenerationService>().Object, new Mock<IVitalityService>().Object, new Mock<ILogger<HitQueue>>().Object);
             var skill = MakeSkill() with { Duration = 100, BCards = new[] { new BCardDto { Type = 3 } } };
 
             await queue.EnqueueAsync(Request(attacker, target) with { Skill = skill });
@@ -154,8 +154,8 @@ namespace NosCore.GameObject.Tests.Services.BattleService
 
         private static BCardDto PercentOfHp(short percent) => new()
         {
-            Type = (byte)BCardType.CardType.RecoveryAndDamagePercent,
-            SubType = (byte)AdditionalTypes.RecoveryAndDamagePercent.DecreaseEnemyHp,
+            Type = BCardEffect.RecoveryAndDamagePercentDecreaseEnemyHp.Type(),
+            SubType = BCardEffect.RecoveryAndDamagePercentDecreaseEnemyHp.SubType(),
             FirstData = percent
         };
 
@@ -167,7 +167,8 @@ namespace NosCore.GameObject.Tests.Services.BattleService
             var stats = new Mock<IBattleStatsProvider>();
             stats.Setup(s => s.GetStats(It.IsAny<IAliveEntity>())).Returns(new CombatStats());
             return new HitQueue(calc.Object, stats.Object, new Mock<IBuffService>().Object,
-                new Mock<IRegenerationService>().Object, new Mock<ILogger<HitQueue>>().Object);
+                new Mock<IRegenerationService>().Object, new Mock<IVitalityService>().Object,
+                new Mock<ILogger<HitQueue>>().Object);
         }
 
         [TestMethod]
@@ -240,8 +241,8 @@ namespace NosCore.GameObject.Tests.Services.BattleService
             var attacker = new FakeBattleEntity();
             var selfInflicted = new BCardDto
             {
-                Type = (byte)BCardType.CardType.RecoveryAndDamagePercent,
-                SubType = (byte)AdditionalTypes.RecoveryAndDamagePercent.DecreaseSelfHp,
+                Type = BCardEffect.RecoveryAndDamagePercentDecreaseSelfHp.Type(),
+                SubType = BCardEffect.RecoveryAndDamagePercentDecreaseSelfHp.SubType(),
                 FirstData = 50
             };
 
@@ -273,7 +274,7 @@ namespace NosCore.GameObject.Tests.Services.BattleService
             var stats = new Mock<IBattleStatsProvider>();
             stats.Setup(s => s.GetStats(It.IsAny<IAliveEntity>())).Returns(new CombatStats());
 
-            return new HitQueue(calc.Object, stats.Object, new Mock<IBuffService>().Object, new Mock<IRegenerationService>().Object, new Mock<ILogger<HitQueue>>().Object);
+            return new HitQueue(calc.Object, stats.Object, new Mock<IBuffService>().Object, new Mock<IRegenerationService>().Object, new Mock<IVitalityService>().Object, new Mock<ILogger<HitQueue>>().Object);
         }
 
         private class MutableDamage

@@ -35,6 +35,7 @@ public sealed class HitQueue(
     IBattleStatsProvider statsProvider,
     IBuffService buffService,
     IRegenerationService regenerationService,
+    IVitalityService vitalityService,
     ILogger<HitQueue> logger) : IHitQueue, ISingletonService
 {
     private readonly ConcurrentDictionary<Entity, Channel<HitRequest>> _channels = new();
@@ -57,6 +58,14 @@ public sealed class HitQueue(
             request.Completion.TrySetResult(new HitOutcome(HitStatus.Cancelled, 0, SuPacketHitMode.SuccessAttack, false));
         }
         return request.Completion.Task;
+    }
+
+    private async Task RefreshVitalityAsync(IAliveEntity entity)
+    {
+        if (entity is ICharacterEntity character)
+        {
+            await vitalityService.RefreshAndNotifyAsync(character).ConfigureAwait(false);
+        }
     }
 
     private Channel<HitRequest> CreateChannel(IAliveEntity target)
@@ -175,12 +184,18 @@ public sealed class HitQueue(
                 regenerationService.NotifyDamaged(hurtCharacter.CharacterId);
             }
 
-            // Skill BCards that don't describe damage (i.e. stat modifiers) become a
-            // buff on the target lasting the skill's Duration. Fire-and-forget is fine:
-            // the worker is already serialising per-target, so ordering is preserved.
             if (!killed && request.Skill.Duration > 0 && request.Skill.BCards.Count > 0)
             {
-                _ = buffService.ApplySkillBuffAsync(target, request.Skill.SkillVnum, request.Skill.Duration, request.Skill.BCards, request.Origin);
+                await buffService
+                    .ApplySkillBuffAsync(target, request.Skill.SkillVnum, request.Skill.Duration,
+                        request.Skill.BCards, request.Origin)
+                    .ConfigureAwait(false);
+
+                await RefreshVitalityAsync(target).ConfigureAwait(false);
+                if (!ReferenceEquals(request.Origin, target))
+                {
+                    await RefreshVitalityAsync(request.Origin).ConfigureAwait(false);
+                }
             }
 
             request.Completion.TrySetResult(new HitOutcome(HitStatus.Landed, damage.Damage, damage.HitMode, killed));
@@ -212,9 +227,7 @@ public sealed class HitQueue(
         for (var i = 0; i < bCards.Count; i++)
         {
             var bCard = bCards[i];
-            if ((BCardType.CardType)bCard.Type != BCardType.CardType.RecoveryAndDamagePercent
-                || bCard.SubType != (byte)AdditionalTypes.RecoveryAndDamagePercent.DecreaseEnemyHp
-                || bCard.FirstData <= 0)
+            if (bCard.Effect() != BCardEffect.RecoveryAndDamagePercentDecreaseEnemyHp || bCard.FirstData <= 0)
             {
                 continue;
             }
@@ -270,28 +283,23 @@ public sealed class HitQueue(
         for (var i = 0; i < bCards.Count; i++)
         {
             var bCard = bCards[i];
-            if ((BCardType.CardType)bCard.Type != BCardType.CardType.SpecialActions)
-            {
-                continue;
-            }
-
             var fields = Math.Max(0, (int)bCard.FirstData);
-            switch ((AdditionalTypes.SpecialActions)bCard.SubType)
+            switch (bCard.Effect())
             {
                 // The target slides backwards along the line joining it to whoever struck.
-                case AdditionalTypes.SpecialActions.PushBack:
+                case BCardEffect.SpecialActionsPushBack:
                     await SlideAsync(target, origin.MapX, origin.MapY, Math.Max(1, fields),
                         away: true, stopAt: 0).ConfigureAwait(false);
                     break;
 
                 // The target is drawn in until it is `fields` away from the caster.
-                case AdditionalTypes.SpecialActions.DrawEnemies:
+                case BCardEffect.SpecialActionsDrawEnemies:
                     await SlideAsync(target, origin.MapX, origin.MapY, int.MaxValue,
                         away: false, stopAt: fields).ConfigureAwait(false);
                     break;
 
                 // The caster closes on the target and stops beside it.
-                case AdditionalTypes.SpecialActions.Charge:
+                case BCardEffect.SpecialActionsCharge:
                     await SlideAsync(origin, target.MapX, target.MapY, Math.Max(1, fields),
                         away: false, stopAt: 1).ConfigureAwait(false);
                     break;
