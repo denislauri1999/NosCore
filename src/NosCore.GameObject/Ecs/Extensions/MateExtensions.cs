@@ -175,16 +175,17 @@ namespace NosCore.GameObject.Ecs.Extensions
             };
         }
 
+        // A serialized field keeps its own spaces unless the property declares a special
+        // separator, and none of the three the name goes into does.
         private static string DisplayName(this Mate mate, RegionType language)
         {
-            if (!string.IsNullOrEmpty(mate.Name))
-            {
-                return mate.Name;
-            }
+            var name = string.IsNullOrEmpty(mate.Name)
+                ? mate.NpcMonster.Name.TryGetValue(language, out var localized)
+                    ? localized
+                    : mate.NpcMonster.Name[RegionType.EN]
+                : mate.Name;
 
-            return mate.NpcMonster.Name.TryGetValue(language, out var localized)
-                ? localized
-                : mate.NpcMonster.Name[RegionType.EN];
+            return name.Replace(' ', '^');
         }
 
         private static int Percent(int current, int maximum, int whenUnknown) =>
